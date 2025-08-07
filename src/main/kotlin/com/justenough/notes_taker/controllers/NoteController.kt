@@ -6,7 +6,10 @@ import com.justenough.notes_taker.database.requests.NoteRequest
 import com.justenough.notes_taker.database.responses.NoteResponse
 import com.justenough.notes_taker.mappers.toNote
 import com.justenough.notes_taker.mappers.toNoteResponse
+import jakarta.validation.Valid
 import org.bson.types.ObjectId
+import org.springframework.http.HttpStatusCode
+import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -15,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
 
 @RestController
@@ -23,10 +27,12 @@ class NoteController(private val repository: NoteRepository) {
 
 
     @PostMapping
-    fun save(@RequestBody body: NoteRequest): NoteResponse {
-        val note = repository.save(
-            body.toNote()
+    fun save(@Valid @RequestBody body: NoteRequest): NoteResponse {
+        val ownerId = SecurityContextHolder.getContext().authentication.principal as String
 
+        println("Owner id: $ownerId")
+        val note = repository.save(
+            body.toNote().copy(ownerId = ObjectId(ownerId))
         )
 
         return note.toNoteResponse()
@@ -34,7 +40,8 @@ class NoteController(private val repository: NoteRepository) {
 
     //https://note-taker.com/notes?ownerId=123
     @GetMapping
-    fun findByOwnerId(@RequestParam(required = true) ownerId: String): List<NoteResponse> {
+    fun findByOwnerId(): List<NoteResponse> {
+        val ownerId = SecurityContextHolder.getContext().authentication.principal as String
         val notes = repository.findByOwnerId(ObjectId(ownerId)).map {
             it.toNoteResponse()
 
@@ -44,7 +51,14 @@ class NoteController(private val repository: NoteRepository) {
 
     @DeleteMapping(path = ["/{id}"])
     fun deleteById(@PathVariable id: String) {
-        repository.deleteById(ObjectId(id))
+        val note = repository.findById(ObjectId(id)).orElseThrow {
+            ResponseStatusException(HttpStatusCode.valueOf(404), "Note not found")
+        }
+        val ownerId = SecurityContextHolder.getContext().authentication.principal as String
+        if (note.ownerId.toHexString() == ownerId) {
+
+            repository.deleteById(ObjectId(id))
+        }
     }
 
 }
